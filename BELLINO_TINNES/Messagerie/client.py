@@ -2,7 +2,6 @@
 # coding: utf-8
 
 import socket
-import msgpack
 from Crypto import Random
 from Crypto.Cipher import AES
 
@@ -24,8 +23,8 @@ class Client():
         self.sock.send(self.pseudo.encode())
 
     def sendMessage(self,message):
-        self.cipher = AES.new(self.key.encode(), AES.MODE_GCM,self.nounce)
-        ciphertext, tag = self.cipher.encrypt_and_digest(message.encode())
+        cipher = AES.new(self.key.encode(), AES.MODE_GCM,self.nounce)
+        ciphertext, tag = cipher.encrypt_and_digest(message.encode())
         self.sock.send(ciphertext)
     
     def sendUnsecureMessage(self,message):
@@ -53,14 +52,16 @@ if __name__ == "__main__":
     print("Message recu : " + data.decode() + '\n')
 
     data = client.sock.recv(1024)
-    print(data)
+
     client.setNounce(data)
 
     while True:
         message = input()
         client.sendMessage(message)
         data = client.sock.recv(1024)
-        print("Message recu : " + data.decode() + '\n')
+        cipher = AES.new(client.key.encode(), AES.MODE_GCM,client.nounce)
+        message = cipher.decrypt(data)
+        print("Message recu : " + message.decode() + '\n')
         
 
     client.disconnect()
