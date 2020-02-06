@@ -3,9 +3,14 @@
 import socket
 import sqlite3
 import hashlib
-import msgpack
+import random
+import string
 from Crypto.Cipher import AES
 from Crypto import Random 
+
+def randomString(stringLength=10):
+    letters = string.ascii_lowercase
+    return ''.join(random.choice(letters) for i in range(stringLength))
 
 class Serveur:
     def __init__(self, port, conn, cursor):
@@ -22,7 +27,7 @@ class Serveur:
 
     def verifier_utilisateur(self, data):
         self.currentUser = data.decode()
-        self.cursor.execute('SELECT KEY, SALT FROM USERS WHERE PSEUDO=?', (data.decode(),))
+        self.cursor.execute('SELECT KEY, SALT, HASH_CHALLENGE FROM USERS WHERE PSEUDO=?', (data.decode(),))
         key = self.cursor.fetchone()
         if not key:
             return 0
@@ -34,13 +39,21 @@ class Serveur:
         myhash = hashlib.sha256(mymdp.encode()).hexdigest()
         myhashhash = hashlib.sha256(myhash.encode()).hexdigest()
         if str(myhashhash) == str(key[0]):
-            self.key = str(myhash)[:32]
-            msg = "Connection reussi : Bienvenue " + self.currentUser
-            conn.send(msg.encode())
-            nounce = Random.new().read(16) # Send Nounce 
-            self.nounce = nounce
-            conn.send(nounce)
-            return 1
+            random_string = randomString(8)
+            H = hashlib.sha256((random_string + str(key[2])).encode()).hexdigest()
+            conn.send(random_string.encode())
+            resulted_hash = conn.recv(512)
+            if str(resulted_hash.decode()) == str(H):
+                print("ok")
+                self.key = str(myhash)[:32]
+                msg = "Connection reussi : Bienvenue " + self.currentUser
+                conn.send(msg.encode())
+                nounce = Random.new().read(16) # Send Nounce 
+                self.nounce = nounce
+                conn.send(nounce)
+                return 1
+            else:
+                return 0
         else:
             return 0
 
@@ -80,6 +93,7 @@ class Serveur:
                         return
                 while True:
                     msg = self.recevoir_message(conn)
+                    print(msg)
                     reponse = self.chiffrer_message(msg)
                     conn.send(reponse)
                 if not data:
