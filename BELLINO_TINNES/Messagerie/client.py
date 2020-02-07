@@ -2,15 +2,17 @@
 # coding: utf-8
 
 import socket
+import pyDHE
 import hashlib
 from Crypto import Random
+from Crypto.Util.number import long_to_bytes
+from Crypto.Util.number import bytes_to_long
 from Crypto.Cipher import AES
 
 class Client():    
 
-    def __init__(self, pseudo, key, challengeSalt):
+    def __init__(self, pseudo,challengeSalt):
         self.pseudo = pseudo
-        self.key = key
         self.challengeSalt = challengeSalt
 
     def connect(self, hote, port):
@@ -21,8 +23,17 @@ class Client():
         except:
             print("Error : Can't connect to server")
 
+    def negotiate(self):
+        self.dh = pyDHE.new(14)
+        self.sock.send(long_to_bytes(self.dh.getPublicKey()))
+        data = self.sock.recv(1024)
+        self.dh.update(bytes_to_long(data))
+        fullKey = self.dh.getFinalKey()
+        self.key = hashlib.sha256((str(fullKey)).encode()).hexdigest()[:32]
+        return self.dh.getFinalKey()
+
     def init(self):
-        self.sock.send(self.pseudo.encode())
+        self.sendMessage(self.pseudo)
 
     def sendMessage(self,message):
         cipher = AES.new(self.key.encode(), AES.MODE_GCM,self.nounce)
@@ -35,8 +46,10 @@ class Client():
     def disconnect(self):
         self.sock.close()
         print("Disconnected")
+
     def setNounce(self,nounce):
         self.nounce = nounce
+
     def challenge(self, password, randomString):
         temp = hashlib.sha256((password + self.challengeSalt).encode()).hexdigest()
         return hashlib.sha256((randomString.decode() + str(temp) ).encode()).hexdigest()
@@ -44,15 +57,25 @@ class Client():
 
 
 if __name__ == "__main__":
-    client = Client("admin","8ff8aec80ea8f2a5ee5e1b6607226399","ERGH7U2S")
+    client = Client("admin","ERGH7U2S")
 
-    client.connect("localhost",1234)
+    client.connect("localhost",1235)
+    # Key exchange
+    print("Negotiating key")
+    DH_key = client.negotiate()
+
+    # Receive the nounce
+    data = client.sock.recv(1024)
+    client.setNounce(data)
+    print("Nounce received !")
+
     client.init()
-    # Demande de mot de passe
+    
+    # Asking password
     data = client.sock.recv(1024)
     print(data.decode() + '\n')
     password = input()
-    client.sendUnsecureMessage(password)
+    client.sendMessage(password)
 
     # Challenge
     print("Challenge started !")
@@ -62,12 +85,7 @@ if __name__ == "__main__":
 
     # MOTD
     data = client.sock.recv(1024)
-    print("Message recu : " + data.decode() + '\n')
-
-    # Receive the nounce
-    data = client.sock.recv(1024)
-    client.setNounce(data)
-    print("Nounce received !")
+    print("MOTD :  " + data.decode() + '\n')
 
     while True:
         message = input()

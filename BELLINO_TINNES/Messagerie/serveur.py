@@ -5,8 +5,12 @@ import sqlite3
 import hashlib
 import random
 import string
+import pyDHE
 from Crypto.Cipher import AES
 from Crypto import Random 
+from Crypto.Util.number import long_to_bytes
+from Crypto.Util.number import bytes_to_long
+
 
 def randomString(stringLength=10):
     letters = string.ascii_lowercase
@@ -17,11 +21,13 @@ class Serveur:
         self.interface = self.obtenir_interface(1, port)
         self.cursor = cursor
         self.connbd = conn
+
+
         print("Serveur Ok.")
 
     def obtenir_interface(self, temps_attente, port):
         interface = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        interface.bind(('0.0.0.0', port))
+        interface.bind(('localhost', port))
         interface.listen(5)
         return interface
 
@@ -45,12 +51,9 @@ class Serveur:
             resulted_hash = conn.recv(512)
             if str(resulted_hash.decode()) == str(H):
                 print("ok")
-                self.key = str(myhash)[:32]
+                #self.key = str(myhash)[:32]
                 msg = "Connection reussi : Bienvenue " + self.currentUser
                 conn.send(msg.encode())
-                nounce = Random.new().read(16) # Send Nounce 
-                self.nounce = nounce
-                conn.send(nounce)
                 return 1
             else:
                 return 0
@@ -74,18 +77,42 @@ class Serveur:
         chiffre, tag = cipher.encrypt_and_digest(msg.encode())
         return chiffre
 
+    def get_DH(self,data, conn):
+        dh = pyDHE.new(14)
+        client_public_key = bytes_to_long(data)
+        final_key_dh = dh.update(client_public_key)
+
+        my_public_key = dh.getPublicKey()
+        conn.send(long_to_bytes(my_public_key))
+        self.key = hashlib.sha256((str(final_key_dh)).encode()).hexdigest()[:32]
+    
+    def generate_nounce(self, conn):
+        nounce = Random.new().read(16) # Send Nounce 
+        self.nounce = nounce
+        conn.send(nounce)
+
+    def recevoir_login(self, conn):
+        data = conn.recv(512)
+        cipher = AES.new(self.key.encode(), AES.MODE_GCM, self.nounce)
+        text = cipher.decrypt(data)
+        print(text.decode())
+        return text
+
     def lancement_serveur(self):
         while True:
             conn, addr = self.interface.accept()
             with conn:
                 while True:
                     data = conn.recv(1024)
-                    key = self.verifier_utilisateur(data)
+                    self.get_DH(data, conn)
+                    self.generate_nounce(conn)
+                    UserData = self.recevoir_login(conn)
+                    key = self.verifier_utilisateur(UserData)
                     if key == 0:
                         return
                     msg = "Pseudo correct, entrez le mot de passe : "
                     conn.send(msg.encode())
-                    mdp = conn.recv(1024)
+                    mdp = self.recevoir_login(conn)
                     result = self.verifier_mot_de_passe(mdp, key, conn)
                     if result == 1:
                         break
@@ -103,5 +130,5 @@ if __name__ == "__main__":
     conn = sqlite3.connect('messagerie.db')
     c = conn.cursor()
 
-    serveur = Serveur(1234, conn, c)
+    serveur = Serveur(1235, conn, c)
     serveur.lancement_serveur()
